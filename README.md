@@ -8,7 +8,7 @@ Other Musicpad Repos:
 - [Musicpad Core](https://github.com/musicpadnet/musicpad-core)
 
 ## Preview of what it looks like
-![Preview](https://i.imgur.com/wjc81Gs.png)
+![Preview](https://i.imgur.com/lZlxO1Y.png)
 
 ## Prerequisites
 
