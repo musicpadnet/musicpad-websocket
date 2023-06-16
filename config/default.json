@@ -1,0 +1,5 @@
+{
+  "port": 4000,
+  "redis": "redis://localhost:6379/1",
+  "mongo": "mongodb://localhost:27017/musicpad"
+}

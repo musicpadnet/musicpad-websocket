@@ -1,0 +1,5 @@
+{
+  "mongo": "MONGO_URI",
+  "redis": "REDIS_URI",
+  "yt": "YT_KEY"
+}
