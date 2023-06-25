@@ -1,18 +1,16 @@
-![musicpad logo](https://i.imgur.com/YnWT1Hb.png)
+![Mixzy logo](https://i.imgur.com/kAKMfIW.png)
 
-Musicpad, A collaborative music listening platform
+Other Mixzy Repos:
 
-Other Musicpad Repos:
-
-- [Musicpad Frontend](https://github.com/musicpadnet/musicpad-frontend)
-- [Musicpad Core](https://github.com/musicpadnet/musicpad-core)
+- [Mixzy Frontend](https://github.com/mixzyhq/mixzy-frontend)
+- [Mixzy Core](https://github.com/mixzyhq/mixzy-core)
 
 ## Preview of what it looks like
 ![Preview](https://i.imgur.com/lZlxO1Y.png)
 
 ## Prerequisites
 
-You'll need to install docker and the core musicpad repo along with the frontend.
+You'll need to install docker and the core Mixzy repo along with the frontend.
 
 You can install docker desktop [Here](https://www.docker.com/products/docker-desktop)
 
