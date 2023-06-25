@@ -1,19 +1,3 @@
-/*
-  __  __           _                      _ 
- |  \/  |         (_)                    | |
- | \  / |_   _ ___ _  ___ _ __   __ _  __| |
- | |\/| | | | / __| |/ __| '_ \ / _` |/ _` |
- | |  | | |_| \__ \ | (__| |_) | (_| | (_| |
- |_|  |_|\__,_|___/_|\___| .__/ \__,_|\__,_|
-                         | |                
-                         |_|                
-
-* Author: Jordan (LIFELINE) <hello@lifeline1337.dev>
-* Copyright (C) 2023 LIFELINE
-* Repo: https://github.com/musicpadnet/musicpad-core
-* LICENSE: MIT <https://github.com/musicpadnet/musicpad-core/blob/main/LICENSE>
-*/
-
 import mongoose from "mongoose";
 import IRoom from "./room.type";
 
@@ -39,23 +23,6 @@ const Room = new mongoose.Schema({
     user: {type: mongoose.Types.ObjectId, required: true, ref:"accounts"},
     by: {type: mongoose.Types.ObjectId, required: true, ref: "accounts"},
     at: {type: Date, required: true, default: Date.now}
-  }],
-  current_dj: {
-    user: {type: mongoose.Types.ObjectId, default: null, ref: "accounts"},
-    song: {
-      title: {type: String, default: null},
-      duration: {type: Number, default: null},
-      time: {type: Number, default: null},
-      upvotes: {type: Number, default: 0},
-      downvotes: {type: Number, default: 0},
-      thumbnail: {type: String, default: null},
-      grabs: {type: Number, default: 0}
-    }
-  },
-  users: [{
-    type: mongoose.Types.ObjectId,
-    required: true,
-    ref: "accounts"
   }],
   queue_history: [{
     played_by: {type: mongoose.Types.ObjectId, required: true, ref: "accounts"},

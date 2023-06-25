@@ -1,28 +1,13 @@
-/*
-  __  __           _                      _ 
- |  \/  |         (_)                    | |
- | \  / |_   _ ___ _  ___ _ __   __ _  __| |
- | |\/| | | | / __| |/ __| '_ \ / _` |/ _` |
- | |  | | |_| \__ \ | (__| |_) | (_| | (_| |
- |_|  |_|\__,_|___/_|\___| .__/ \__,_|\__,_|
-                         | |                
-                         |_|                
-
-* Author: Jordan (LIFELINE) <hello@lifeline1337.dev>
-* Copyright (C) 2023 LIFELINE
-* Repo: https://github.com/musicpadnet/musicpad-core
-* LICENSE: MIT <https://github.com/musicpadnet/musicpad-core/blob/main/LICENSE>
-*/
-
 import config from "config";
 import { createClient } from "redis";
 import { Server, Socket } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import accessTokenModel from "./models/access_token/access_token.model";
 import initDB from "./db";
-import { initRooms } from "./initRooms";
 import roomModel from "./models/room/room.model";
 import accountModel from "./models/account/account.model";
+import Redis from "ioredis";
+import queue from "./queue";
 
 export class sockie {
 
@@ -30,11 +15,17 @@ export class sockie {
 
   connections: any[string] = {};
 
+  pubClient: Redis;
+
+  subClient: Redis;
+
+  redis: Redis;
+
   constructor () {
 
     this.dbinit();
 
-    initRooms();
+    this.redis = new Redis(config.get("redis3"));
 
     this.io = new Server({
       pingInterval: 30000,
@@ -53,6 +44,10 @@ export class sockie {
     this.io.listen(config.get("port"));
 
     this.handleConnections();
+
+    this.pubClient = new Redis(config.get("redis"));
+
+    this.subClient = this.pubClient.duplicate();
 
     console.log(`socket server is now running on port ${config.get("port")}`);
     
@@ -93,12 +88,18 @@ export class sockie {
             case "chatmessage":
               return await this.handleChatMessageMethod(socket, message.message);
 
+            case "joinqueue":
+              return await this.handleJoinQueueMethod(socket);
+            
+            case "leavequeue":
+              return this.handleLeaveQueueMethod(socket);
+
           }
 
         }
 
       });
-
+      
       await this.handleDisconnectRoomLeave(socket);
 
       socket.on("disconnect", () => {
@@ -107,7 +108,7 @@ export class sockie {
 
           delete this.connections[socket.id];
 
-        }, 3000);
+        }, 10000);
 
       });
 
@@ -144,23 +145,39 @@ export class sockie {
 
       if (this.connections[socket.id].room) {
 
-        await roomModel.updateOne({slug: this.connections[socket.id].room}, {$pull: {users: this.connections[socket.id].user.id}});
+        const r = await roomModel.findOne({slug: this.connections[socket.id].room});
 
-        const r = await roomModel.findOne({slug: this.connections[socket.id].room}).populate("users").exec();
+        if (!r) return console.log("unable to find room");
 
-        if (!r) return console.log("room doesn't exists wtf!!!");
+        const rRoom = await this.redis.get(`rooms:${r.id}`);
 
-        const users = r.users.map((usr) => {
+        if (rRoom) {
 
-          return {
-            id: usr.id,
-            username: usr.username,
-            pfp: usr.profile_image
+          const parsedRoom = JSON.parse(rRoom);
+
+          const findUserIndex = parsedRoom.users.findIndex((usr:any) => usr.id === this.connections[socket.id].user.id);
+
+          if (findUserIndex !== -1) {
+
+            parsedRoom.users.splice(findUserIndex, 1);
+
+            await this.redis.set(`rooms:${r.id}`, JSON.stringify(parsedRoom));
+
+            this.io.to(this.connections[socket.id].room).emit("message", {"type": "event", "event": "userLeft", "users": parsedRoom.users});
+
+            const res = await queue.leaveQueue(this.connections, socket, this.redis);
+
+            if (res.success) {
+
+              this.io.to(this.connections[socket.id].room).emit("message", {type: "event", "event": "userleavewaitlist", "waitlist": res.waitlist});
+
+            }
+
+            this.connections[socket.id].room = null;
+
           }
-  
-        });
 
-        this.io.to(this.connections[socket.id].room).emit("message", {"type": "event", "event": "userLeft", "users": users});
+        }
 
       }
 
@@ -180,23 +197,33 @@ export class sockie {
 
       socket.leave(this.connections[socket.id].room);
 
-      await roomModel.updateOne({slug: this.connections[socket.id].room}, {$pull: {users: this.connections[socket.id].user.id}});
+      const r = await roomModel.findOne({slug: this.connections[socket.id].room});
 
-        const r = await roomModel.findOne({slug: this.connections[socket.id].room}).populate("users").exec();
+      if (!r) return console.log("unable to find room");
 
-        if (!r) return console.log("room doesn't exists wtf!!!");
+      const rRoom = await this.redis.get(`rooms:${r.id}`);
 
-        const users = r.users.map((usr) => {
+      if (rRoom) {
 
-          return {
-            id: usr.id,
-            username: usr.username,
-            pfp: usr.profile_image
-          }
-  
-        });
+        console.log("room exists");
 
-        this.io.to(this.connections[socket.id].room).emit("message", {"type": "event", "event": "userLeft", "users": users});
+        const parsedRoom = JSON.parse(rRoom);
+
+        const findUserIndex = parsedRoom.users.findIndex((usr:any) => usr.id === this.connections[socket.id].user.id);
+
+        if (findUserIndex !== -1) {
+
+          parsedRoom.users.splice(findUserIndex, 1);
+
+          await this.redis.set(`rooms:${r.id}`, JSON.stringify(parsedRoom));
+
+          this.io.to(this.connections[socket.id].room).emit("message", {"type": "event", "event": "userLeft", "users": parsedRoom.users});
+
+          this.connections[socket.id].room = null;
+
+        }
+
+      }
 
     } catch (err) {
 
@@ -225,25 +252,27 @@ export class sockie {
 
       socket.join(room);
 
-      await roomModel.updateOne({slug: room}, {$addToSet: {users: this.connections[socket.id].user.id}});
+      const rRoom = await this.redis.get(`rooms:${r.id}`);
 
-      const updatedRoom = await roomModel.findOne({_id: r.id}).populate("users").exec();
+      if (rRoom) {
 
-      if (!updatedRoom) return console.log("unable to get updated room");
+        const parsedRoom = JSON.parse(rRoom);
 
-      const users = updatedRoom.users.map((usr) => {
-
-        return {
-          id: usr.id,
-          username: usr.username,
-          pfp: usr.profile_image
+        const u = {
+          id: this.connections[socket.id].user.id,
+          username: this.connections[socket.id].user.username,
+          pfp: this.connections[socket.id].user.profile_image
         }
 
-      });
+        parsedRoom.users.push(u);
 
-      this.connections[socket.id].room = room;
+        await this.redis.set(`rooms:${r.id}`, JSON.stringify(parsedRoom));
 
-      this.io.to(room).emit("message", {"type": "event", "event": "userJoined", "users": users});
+        this.connections[socket.id].room = room;
+
+        this.io.to(room).emit("message", {"type": "event", "event": "userJoined", "users": parsedRoom.users});
+
+      }
 
     } catch (err) {
       console.log(err);
@@ -269,6 +298,57 @@ export class sockie {
     } catch (err) {
 
       console.log(err);
+
+    }
+
+  }
+
+  // hanldeJoinQueueMethod
+  async handleJoinQueueMethod (socket: Socket) {
+
+    // ensure user is authenticated and is in a room
+    if (this.connections[socket.id].auth === true && this.connections[socket.id].room !== null) {
+
+      const res = await queue.addToQueue(this.connections, socket, this.redis);
+
+      if (!res.success) {
+
+        socket.emit("message", {type: "event", "event": "joinqueueerror"});
+
+      } else {
+
+        this.io.to(this.connections[socket.id].room).emit("message", {type: "event", "event": "userjoinqueue", "waitlist": res.waitlist});
+
+        socket.emit("message", {type: "event", "event": "joinedqueue"});
+
+      }
+
+    }
+
+  }
+
+  // handleLeaveQueueMethod
+  async handleLeaveQueueMethod (socket: Socket) {
+
+    try {
+
+      if (this.connections[socket.id].auth === true && this.connections[socket.id].room !== null) {
+
+        const res = await queue.leaveQueue(this.connections, socket, this.redis);
+
+        if (res.success) {
+
+          this.io.to(this.connections[socket.id].room).emit("message", {type: "event", "event": "userleavewaitlist", "waitlist": res.waitlist});
+
+          socket.emit("message", {type: "event", "event": "leftqueue"});
+
+        }
+
+      }
+
+    } catch (err) {
+
+      throw err;
 
     }
 
