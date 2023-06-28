@@ -1,6 +1,6 @@
 {
   "port": 4000,
-  "redis": "redis://localhost:6379/1",
+  "redis": "redis://localhost:6379/2",
   "redis3": "redis://localhost:6379/3",
-  "mongo": "mongodb://localhost:27017/musicpad"
+  "mongo": "mongodb://localhost:27017/mixzy"
 }
