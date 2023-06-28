@@ -4,7 +4,7 @@ import roomModel from "./models/room/room.model";
 
 class Queue {
 
-  async addToQueue (connections: any[string], socket: Socket, redis: Redis): Promise<{success: boolean, waitlist?: any[] | null}> {
+  async addToQueue (connections: any[string], socket: Socket, redis: Redis, pubClient: Redis): Promise<{success: boolean, waitlist?: any[] | null}> {
 
     try {
   
@@ -34,6 +34,12 @@ class Queue {
 
         await redis.set(`rooms:${userRoom.id}`, JSON.stringify(parsedvRoom));
 
+        if (parsedvRoom.waitlist[0] && parsedvRoom.current_dj.user === null) {
+
+          pubClient.publish(`room:${parsedvRoom.id}`, JSON.stringify({"type": "method", "method": "calladvance"}));
+
+        }
+
         res.waitlist = parsedvRoom.waitlist;
 
       }
@@ -58,7 +64,7 @@ class Queue {
   }
 
   // leave queue method
-  async leaveQueue (connections: any[string], socket: Socket, redis: Redis): Promise<{success: boolean, waitlist?: any[] | null}> {
+  async leaveQueue (connections: any[string], socket: Socket, redis: Redis, pubClient: Redis): Promise<{success: boolean, waitlist?: any[] | null}> {
 
     try {
 
@@ -78,15 +84,65 @@ class Queue {
       
       const position = await this.checkPos(parsedVRoom.waitlist, connections[socket.id].user.id);
 
-      if (position !== -1) {
+      if (parsedVRoom.current_dj.user?.id === connections[socket.id].user.id) {
 
-        res.success = true;
+        if (parsedVRoom.waitlist.length === 0) {
+  
+          pubClient.publish(`room:${parsedVRoom.id}`, JSON.stringify({"type": "method", "method": "calladvance", "ignoreCycle": true, "dontadd": true}));
 
-        parsedVRoom.waitlist.splice(position, 1);
+          res.success = true;
 
-        await redis.set(`rooms:${room.id}`, JSON.stringify(parsedVRoom));
+          res.waitlist = parsedVRoom.waitlist;
 
-        res.waitlist = parsedVRoom.waitlist;
+        } else {
+
+          pubClient.publish(`room:${parsedVRoom.id}`, JSON.stringify({"type": "method", "method": "calladvance", "dontadd": true}));
+
+          res.success = true;
+
+          res.waitlist = parsedVRoom.waitlist;
+
+        }
+
+      } else {
+
+        if (position !== -1 || parsedVRoom.current_dj.user?.id === connections[socket.id].user.id) {
+
+          res.success = true;
+  
+          parsedVRoom.waitlist.splice(position, 1);
+  
+          await redis.set(`rooms:${room.id}`, JSON.stringify(parsedVRoom));
+  
+          console.log(parsedVRoom.waitlist.length);
+  
+          if (parsedVRoom.current_dj.user?.id === connections[socket.id].user.id) {
+  
+            const vRoom2 = await redis.get(`rooms:${room.id}`);
+  
+            if (!vRoom2) return res;
+  
+            const parsedVRoom2 = JSON.parse(vRoom2);
+  
+            if (parsedVRoom2) {
+  
+              if (parsedVRoom2.waitlist.length === 0) {
+  
+                pubClient.publish(`room:${parsedVRoom.id}`, JSON.stringify({"type": "method", "method": "calladvance", "ignoreCycle": true}));
+  
+              } else {
+  
+                pubClient.publish(`room:${parsedVRoom.id}`, JSON.stringify({"type": "method", "method": "calladvance"}));
+  
+              }
+  
+            }
+  
+          }
+  
+          res.waitlist = parsedVRoom.waitlist;
+  
+        }
 
       }
 

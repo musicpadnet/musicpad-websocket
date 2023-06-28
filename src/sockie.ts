@@ -13,7 +13,7 @@ export class sockie {
 
   io: Server;
 
-  connections: any[string] = {};
+  connections: any[string] = [];
 
   pubClient: Redis;
 
@@ -50,6 +50,58 @@ export class sockie {
     this.subClient = this.pubClient.duplicate();
 
     console.log(`socket server is now running on port ${config.get("port")}`);
+
+    this.subClient.subscribe("advances", "userplupdate", (err) => {
+
+      if (!err) {
+        console.log("now listening for advances")
+      }
+
+    });
+
+    this.subClient.on("message", async (channel, message) => {
+
+      const parsedMessage = JSON.parse(message);
+
+      if (parsedMessage.type === "event" && parsedMessage.event === "advance") {
+
+        const room = await roomModel.findOne({_id: parsedMessage.room});
+
+        if (!room) throw "room does not exist";
+
+        const vRoom = await this.redis.get(`rooms:${room.id}`);
+
+        if (!vRoom) throw "room doesn't exist in redis";
+
+        const parsedRoom = JSON.parse(vRoom);
+
+        for (let conn in this.connections) {
+
+          if (this.connections[conn].room && this.connections[conn].room === room.slug) {
+
+            this.connections[conn].socket.emit("message", {type: "event", "event": "advance", "current_dj": parsedRoom.current_dj, "waitlist": parsedRoom.waitlist})
+
+          }
+
+        }
+
+      } else if (parsedMessage.type === "event" && parsedMessage.event === "userplupdate") {
+
+        console.log("fired update playlists");
+
+        for (let conn in this.connections) {
+
+          if (this.connections[conn].user.id === parsedMessage.user) {
+
+            this.connections[conn].socket.emit("message", {type: "event", "event": "updateuserpl", "playlists": parsedMessage.playlists});
+
+          }
+
+        }
+
+      }
+
+    });
     
   }
 
@@ -93,6 +145,9 @@ export class sockie {
             
             case "leavequeue":
               return this.handleLeaveQueueMethod(socket);
+
+            case "getcurrenttime":
+              return await this.getRoomsCurrentTime(socket);
 
           }
 
@@ -165,7 +220,7 @@ export class sockie {
 
             this.io.to(this.connections[socket.id].room).emit("message", {"type": "event", "event": "userLeft", "users": parsedRoom.users});
 
-            const res = await queue.leaveQueue(this.connections, socket, this.redis);
+            const res = await queue.leaveQueue(this.connections, socket, this.redis, this.pubClient);
 
             if (res.success) {
 
@@ -246,7 +301,7 @@ export class sockie {
 
       if (this.connections[socket.id].room) return socket.emit("alreadyinaroom");
 
-      const r = await roomModel.findOne({slug: room}).populate("users").exec();
+      const r = await roomModel.findOne({slug: room});
 
       if (!r) return socket.emit("message", {"type": "event", "event": "room doesn't exist"});
 
@@ -309,7 +364,7 @@ export class sockie {
     // ensure user is authenticated and is in a room
     if (this.connections[socket.id].auth === true && this.connections[socket.id].room !== null) {
 
-      const res = await queue.addToQueue(this.connections, socket, this.redis);
+      const res = await queue.addToQueue(this.connections, socket, this.redis, this.pubClient);
 
       if (!res.success) {
 
@@ -334,7 +389,7 @@ export class sockie {
 
       if (this.connections[socket.id].auth === true && this.connections[socket.id].room !== null) {
 
-        const res = await queue.leaveQueue(this.connections, socket, this.redis);
+        const res = await queue.leaveQueue(this.connections, socket, this.redis, this.pubClient);
 
         if (res.success) {
 
@@ -342,6 +397,40 @@ export class sockie {
 
           socket.emit("message", {type: "event", "event": "leftqueue"});
 
+        }
+
+      }
+
+    } catch (err) {
+
+      throw err;
+
+    }
+
+  }
+
+  // get current song time
+  async getRoomsCurrentTime(socket: Socket) {
+
+    try {
+
+      if (this.connections[socket.id].room && this.connections[socket.id].auth === true) {
+
+        const room = await roomModel.findOne({slug: this.connections[socket.id].room});
+
+        if (!room) throw "Room doesn't exist";
+
+        const vRoom = await this.redis.get(`rooms:${room.id}`);
+
+        if (!vRoom) throw "room in redis not found";
+
+        const parsedRoom = JSON.parse(vRoom);
+
+        if (!parsedRoom.current_dj.song.time) {
+          socket.emit("message", {type: "event", event: "currenttime", time: null});
+        } else {
+          let time = Math.abs((Date.now( ) - parsedRoom.current_dj.song.time) / 1000);
+          socket.emit("message", {type: "event", event: "currenttime", time: time});
         }
 
       }
